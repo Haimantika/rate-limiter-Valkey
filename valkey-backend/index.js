@@ -51,8 +51,18 @@ const rateLimiter = async (req, res, next) => {
 };
 
 // Chuck Norris joke route (rate limited)
-app.get('/api/ping', (req, res) => {
-  res.send('pong');
+app.get('/api/joke', async (req, res) => {
+  console.log("✅ Incoming request to /api/joke");
+
+  try {
+    const response = await fetch('https://api.chucknorris.io/jokes/random');
+    const data = await response.json();
+    console.log("✅ Joke fetched:", data.value);
+    res.send(data.value);
+  } catch (err) {
+    console.error("❌ Failed to fetch joke:", err);
+    res.status(500).send('Failed to fetch joke');
+  }
 });
 
 
