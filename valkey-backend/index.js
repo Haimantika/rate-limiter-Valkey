@@ -1,8 +1,8 @@
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 require('dotenv').config();
 const express = require('express');
 const Redis = require('ioredis');
 const cors = require('cors');
-const fetch = require('node-fetch'); // make sure you have node-fetch installed
 
 const app = express();
 app.use(cors());
@@ -22,36 +22,45 @@ const redis = new Redis({
   tls: {}, // Required for DigitalOcean Valkey
 });
 
+// Lua script for atomic rate limiting
+const rateLimiterLuaScript = `
+  local current
+  current = redis.call("INCR", KEYS[1])
+  if tonumber(current) == 1 then
+    redis.call("EXPIRE", KEYS[1], ARGV[1])
+  end
+  return current
+`;
+
+// Rate limiter middleware
+const rateLimiter = async (req, res, next) => {
+  const ip = req.ip || 'global';
+  const limit = 5;
+  const windowInSeconds = 60;
+  const key = `rate:${ip}`;
+
+  try {
+    const current = await redis.eval(rateLimiterLuaScript, 1, key, windowInSeconds);
+    console.log(`[RateLimit] IP: ${ip} - Count: ${current}`);
+
+    if (current > limit) {
+      return res.status(429).send('🚫 Rate limit exceeded. Please wait a minute.');
+    }
+
+    next();
+  } catch (err) {
+    console.error('[Valkey error]', err);
+    res.status(500).send('Valkey error');
+  }
+};
+
 // Health check route
 app.get('/api/ping', (req, res) => {
   res.send('pong');
 });
 
-// Rate limiter middleware
-const rateLimiter = async (req, res, next) => {
-  const ip = req.ip || 'global';
-  const now = Math.floor(Date.now() / 60); // time window in minutes
-  const key = `rate:${ip}:${now}`;
-  const limit = 5;
-
-  try {
-    const current = await redis.incr(key);
-    if (current === 1) {
-      await redis.expire(key, 60);
-    }
-    console.log(`[RateLimit] IP: ${ip} - Count: ${current}`);
-    if (current > limit) {
-      return res.status(429).send('Rate limit exceeded');
-    }
-    next();
-  } catch (err) {
-    console.error('[Redis error]', err);
-    res.status(500).send('Redis error');
-  }
-};
-
 // Chuck Norris joke route (rate limited)
-app.get('/api/joke', async (req, res) => {
+app.get('/api/joke', rateLimiter, async (req, res) => {
   console.log("✅ Incoming request to /api/joke");
 
   try {
@@ -65,11 +74,13 @@ app.get('/api/joke', async (req, res) => {
   }
 });
 
-
 // Start server
 app.listen(PORT, () => {
   console.log(`✅ API server running on http://localhost:${PORT}`);
 });
+
+
+
 
 
 
