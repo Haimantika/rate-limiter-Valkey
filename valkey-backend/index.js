@@ -54,10 +54,6 @@ const rateLimiter = async (req, res, next) => {
   }
 };
 
-// Health check route
-app.get('/api/ping', (req, res) => {
-  res.send('pong');
-});
 
 // Chuck Norris joke route (rate limited)
 app.get('/api/joke', rateLimiter, async (req, res) => {
